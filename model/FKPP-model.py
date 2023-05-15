@@ -9,19 +9,20 @@ import pandas as pd
 
 import time
 
+DTYPE = 'float32'
 
 class PINN_FisherKPP:
 	def __init__(self, data, bounds, hidden_layers):
 		t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r = data
 		self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
-		self.x_0 = tf.Tensor(x_0)
-		self.u_0 = tf.Tensor(u_0)
-		self.t_0 = tf.Tensor(t_0)
-		self.x_b = tf.Tensor(x_b)
-		self.u_b = tf.Tensor(u_b)
-		self.x_r = tf.Tensor(x_r)
-		self.t_r = tf.Tensor(t_r)
+		self.x_0 = tf.Tensor(x_0, dtype = DTYPE)
+		self.u_0 = tf.Tensor(u_0, dtype = DTYPE)
+		self.t_0 = tf.Tensor(t_0, dtype = DTYPE)
+		self.x_b = tf.Tensor(x_b, dtype = DTYPE)
+		self.u_b = tf.Tensor(u_b, dtype = DTYPE)
+		self.x_r = tf.Tensor(x_r, dtype = DTYPE)
+		self.t_r = tf.Tensor(t_r, dtype = DTYPE)
 		
 		self.hidden_layers = hidden_layers
 
@@ -43,7 +44,7 @@ class PINN_FisherKPP:
 				kernel_initializer = 'glorot_normal'))
 
 		# output layer
-		model.add(tf.keras.layers.Dense(1))
+		model.add(tf.keras.layers.Dense(1, activation = 'sigmoid'))
 
 		return model
 
@@ -91,7 +92,12 @@ class PINN_FisherKPP:
 
 	def train(self, num_epochs):
 		model = self.build_model()
-		optimizer = tf.keras.optimizers.Adam()
+
+		learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+			[1000, 3000], [0.01, 0.001, 0.0005])
+
+
+		optimizer = tf.keras.optimizers.Adam(learning_rate = learning_rate_fn)
 		losses = []
 
 		start_time = time.time()
@@ -104,7 +110,7 @@ class PINN_FisherKPP:
 				print("Epoch {}: loss = {}, time elapsed".format(epoch, loss.numpy(), time.time() - start_time))
 
 		# plot losses
-		
+
 
 
 
