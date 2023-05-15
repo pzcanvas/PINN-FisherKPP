@@ -6,10 +6,11 @@ from matplotlib.pyplot import imread
 import scipy
 import pandas as pd
 
+
 import time
 
 
-class PINN:
+class PINN_FisherKPP:
 	def __init__(self, data, bounds, hidden_layers):
 		t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r = data
 		self.t_min, self.t_max, self.x_min, self.x_max = bounds
@@ -86,9 +87,28 @@ class PINN:
 		del tape
 		return loss, grad
 
-	def train(self, num_epochs):
 
-		#for epoch in range(num_epochs):
+
+	def train(self, num_epochs):
+		model = self.build_model()
+		optimizer = tf.keras.optimizers.Adam()
+		losses = []
+
+		start_time = time.time()
+
+		for epoch in range(1, num_epochs + 1):
+			loss, grad = self.compute_grad(model)
+			optimizer.apply_gradients(zip(grad, model.trainable_variables))
+			losses.append(loss.numpy())
+			if epoch % 10 == 0:
+				print("Epoch {}: loss = {}, time elapsed".format(epoch, loss.numpy(), time.time() - start_time))
+
+		# plot losses
+		
+
+
+
+
 
 
 
