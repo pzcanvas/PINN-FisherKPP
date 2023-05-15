@@ -5,35 +5,44 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import imread
 import scipy
 import pandas as pd
-
-
 import time
 
-DTYPE = 'float32'
+class ScaleLayer(tf.keras.layers.Layer):
+    def __init__(self, scale_function = lambda x : x):
+    	super(ScaleLayer, self).__init__()
+      	self.scale = scale_function
+
+    def call(self, inputs):
+      	return self.scale(inputs)
+
 
 class PINN_FisherKPP:
 	def __init__(self, data, bounds, hidden_layers):
 		t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r = data
 		self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
-		self.x_0 = tf.Tensor(x_0, dtype = DTYPE)
-		self.u_0 = tf.Tensor(u_0, dtype = DTYPE)
-		self.t_0 = tf.Tensor(t_0, dtype = DTYPE)
-		self.x_b = tf.Tensor(x_b, dtype = DTYPE)
-		self.u_b = tf.Tensor(u_b, dtype = DTYPE)
-		self.x_r = tf.Tensor(x_r, dtype = DTYPE)
-		self.t_r = tf.Tensor(t_r, dtype = DTYPE)
+		self.x_0 = tf.Tensor(x_0, dtype = tf.float32)
+		self.u_0 = tf.Tensor(u_0, dtype = tf.float32)
+		self.t_0 = tf.Tensor(t_0, dtype = tf.float32)
+		self.x_b = tf.Tensor(x_b, dtype = tf.float32)
+		self.u_b = tf.Tensor(u_b, dtype = tf.float32)
+		self.x_r = tf.Tensor(x_r, dtype = tf.float32)
+		self.t_r = tf.Tensor(t_r, dtype = tf.float32)
 		
 		self.hidden_layers = hidden_layers
 
 	def residual(t, x, u, u_t, u_x, u_xx):
 		return u_t - u_xx - u * (1 - u)
 
+
 	def build_model(self):
 
 		model = tf.keras.Sequential()
 		# input layer (t, x)
-		model.add(tf.keras.Input(shape = 2))
+		model.add(tf.keras.layers.InputLayer(2))
+		# scale inputs within bounds
+		scale_function = lambda inputs : 2 * (inputs - tf.Tensor([t_min, x_min])) / tf.Tensor([t_max - t_min, x_max - x_min]) - 1.0
+		model.add(ScaleLayer(scale_function = scale_function))
 
 		# hidden layers
 		for layer in self.hidden_layers:
@@ -43,7 +52,7 @@ class PINN_FisherKPP:
 				activation = 'tanh', 
 				kernel_initializer = 'glorot_normal'))
 
-		# output layer
+		# output layer with sigmoid activation
 		model.add(tf.keras.layers.Dense(1, activation = 'sigmoid'))
 
 		return model
@@ -107,12 +116,14 @@ class PINN_FisherKPP:
 			optimizer.apply_gradients(zip(grad, model.trainable_variables))
 			losses.append(loss.numpy())
 			if epoch % 10 == 0:
-				print("Epoch {}: loss = {}, time elapsed".format(epoch, loss.numpy(), time.time() - start_time))
+				print("Epoch {}: loss = {}, time elapsed".format(
+					epoch, loss.numpy(), time.time() - start_time))
 
 		# plot losses
 
 
-
+if __name__ == "__main__":
+	hidden_layers = [20, 20, 20, 20, 20, 20, 20, 20]
 
 
 
