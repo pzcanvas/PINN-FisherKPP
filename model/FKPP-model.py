@@ -134,6 +134,10 @@ class PINN_FisherKPP:
 
 		return model, losses
 
+	def plot_dataset(self):
+		pass
+
+
 	def plot_loss(self, losses):
 		fig = plt.figure()
 		hist = fig.add_subplot(111)
@@ -142,6 +146,7 @@ class PINN_FisherKPP:
 		hist.set_ylabel('loss')
 		plt.savefig('loss_plot.png', bbox_inches = 'tight')
 
+	# this plot function is based on existing pyplot tutorials from Github 
 	def plot_prediction(self, model):
 		# Set up meshgrid
 		N = 600
@@ -167,10 +172,16 @@ class PINN_FisherKPP:
 		ax.set_title('Solution of FKPP equation');
 		plt.savefig('FKPP_Solution.pdf', bbox_inches='tight', dpi=300)
 
-	def show_results(self, num_epochs = 10000):
-		model, losses = self.train(num_epochs)
-		self.plot_loss()
-		self.plot_prediction()
+	def train_adaptive(self, num_epochs):
+		pass
+
+	def train_and_show_results(self, num_epochs = 10000, adaptive = False):
+		if not adaptive: 
+			model, losses = self.train(num_epochs)
+			self.plot_loss()
+			self.plot_prediction()
+		if adaptive:
+			pass
 
 
 
@@ -178,7 +189,7 @@ if __name__ == "__main__":
 	hidden_layers = [20, 20, 20, 20, 20, 20, 20, 20]
 	data = data.generate_data()
 	my_PINN = PINN_FisherKPP(data, hidden_layers)
-	my_PINN.show_results()
+	my_PINN.train_and_show_results()
 
 
 
