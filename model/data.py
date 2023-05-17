@@ -46,7 +46,7 @@ def generate_data(num_0: int = N_INITIAL, num_b: int = N_BOUNDARY, num_r: int = 
 	t_r = np.random.uniform(t_min, t_max, num_r)
 	x_r = np.random.uniform(x_min, x_max, num_r)
 
-	return t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r
+	return t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r, bounds
 
 
 
