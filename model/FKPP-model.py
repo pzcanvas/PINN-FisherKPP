@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import imread
 from mpl_toolkits.mplot3d import Axes3D
 import scipy
-import pandas as pd
+#import pandas as pd
 import time
 import data
 
@@ -15,28 +15,33 @@ import data
 class ScaleLayer(tf.keras.layers.Layer):
     def __init__(self, scale_function = lambda x : x):
     	super(ScaleLayer, self).__init__()
-      	self.scale = scale_function
+    	self.scale = scale_function
 
     def call(self, inputs):
       	return self.scale(inputs)
 
 
 class PINN_FisherKPP:
-	def __init__(self, data, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise'):
+	def __init__(self, data, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', activation = None):
 		t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r, bounds = data
 		self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
-		self.x_0 = tf.Tensor(x_0, dtype = tf.float32)
-		self.u_0 = tf.Tensor(u_0, dtype = tf.float32)
-		self.t_0 = tf.Tensor(t_0, dtype = tf.float32)
-		self.x_b = tf.Tensor(x_b, dtype = tf.float32)
-		self.u_b = tf.Tensor(u_b, dtype = tf.float32)
-		self.x_r = tf.Tensor(x_r, dtype = tf.float32)
-		self.t_r = tf.Tensor(t_r, dtype = tf.float32)
+		self.x_0 = tf.convert_to_tensor(x_0, dtype = tf.float32)
+		self.u_0 = tf.convert_to_tensor(u_0, dtype = tf.float32)
+		self.t_0 = tf.convert_to_tensor(t_0, dtype = tf.float32)
+		self.x_b = tf.convert_to_tensor(x_b, dtype = tf.float32)
+		self.u_b = tf.convert_to_tensor(u_b, dtype = tf.float32)
+		self.t_b = tf.convert_to_tensor(t_b, dtype = tf.float32)
+		self.x_r = tf.convert_to_tensor(x_r, dtype = tf.float32)
+		self.t_r = tf.convert_to_tensor(t_r, dtype = tf.float32)
+
 		
 		self.hidden_layers = hidden_layers
+		self.activation = activation
+		self.lr_decay = lr_decay
+		self.learning_rate = learning_rate
 
-	def residual(t, x, u, u_t, u_x, u_xx):
+	def residual(self, t, x, u, u_t, u_x, u_xx):
 		return u_t - u_xx - u * (1 - u)
 
 
@@ -46,7 +51,7 @@ class PINN_FisherKPP:
 		# input layer (t, x)
 		model.add(tf.keras.layers.InputLayer(2))
 		# scale inputs within bounds
-		scale_function = lambda inputs : 2 * (inputs - tf.Tensor([t_min, x_min])) / tf.Tensor([t_max - t_min, x_max - x_min]) - 1.0
+		scale_function = lambda inputs : 2 * (inputs - tf.convert_to_tensor([self.t_min, self.x_min])) / tf.convert_to_tensor([self.t_max - self.t_min, self.x_max - self.x_min]) - 1.0
 		model.add(ScaleLayer(scale_function = scale_function))
 
 		# hidden layers
@@ -58,7 +63,7 @@ class PINN_FisherKPP:
 				kernel_initializer = 'glorot_normal'))
 
 		# output layer with sigmoid activation
-		model.add(tf.keras.layers.Dense(1, activation = 'sigmoid'))
+		model.add(tf.keras.layers.Dense(1, activation = self.activation))
 
 		return model
 
@@ -69,7 +74,7 @@ class PINN_FisherKPP:
 			t = self.t_r
 			x = self.x_r
 			tape.watch(t)
-			tape.watch(r)
+			tape.watch(x)
 			u_r = model(tf.stack([t, x], axis = 1))
 			u_x = tape.gradient(u_r, x)
 		#u_x = tape.gradient(u_r, x)
@@ -78,7 +83,7 @@ class PINN_FisherKPP:
 
 		del tape
 
-		return residual(t, x, u_r, u_t, u_x, u_xx)
+		return self.residual(t, x, u_r, u_t, u_x, u_xx)
 
 	def compute_loss(self, model, scale_initial_loss = None):
 		loss = 0
@@ -94,7 +99,7 @@ class PINN_FisherKPP:
 		loss += tf.reduce_mean(tf.square(res))
 
 		return loss
-
+	#@tf.function
 	def compute_grad(self, model):
 		with tf.GradientTape() as tape:
 			tape.watch(model.trainable_variables)
@@ -108,14 +113,14 @@ class PINN_FisherKPP:
 	def train(self, num_epochs):
 		model = self.build_model()
 
-		learning_rate_fn = learning_rate
+		learning_rate_fn = self.learning_rate
 
-		if lr_decay == 'piecewise':
+		if self.lr_decay == 'piecewise':
 			learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
 				[num_epochs//3, 2*num_epochs//3], 
-				[learning_rate, learning_rate / 10, learning_rate / 20])
+				[self.learning_rate, self.learning_rate / 10, self.learning_rate / 20])
 
-		if lr_decay == 'exponential':
+		if self.lr_decay == 'exponential':
 			learning_rate_fn = tf.keras.optimizers.schedules.ExponentialDecay(
 				learning_rate, decay_steps = 100000, decay_rate = 0.96, staircase = True)
 
@@ -141,7 +146,7 @@ class PINN_FisherKPP:
 	def plot_loss(self, losses):
 		fig = plt.figure()
 		hist = fig.add_subplot(111)
-		hist.plot(range(0, len(hist)), hist)
+		hist.plot(range(0, len(losses)), hist)
 		hist.set_xlabel('# of epochs')
 		hist.set_ylabel('loss')
 		plt.savefig('loss_plot.png', bbox_inches = 'tight')
@@ -175,11 +180,11 @@ class PINN_FisherKPP:
 	def train_adaptive(self, num_epochs):
 		pass
 
-	def train_and_show_results(self, num_epochs = 10000, adaptive = False):
+	def train_and_show_results(self, num_epochs = 500, adaptive = False):
 		if not adaptive: 
 			model, losses = self.train(num_epochs)
-			self.plot_loss()
-			self.plot_prediction()
+			self.plot_loss(losses)
+			self.plot_prediction(model)
 		if adaptive:
 			pass
 
@@ -187,7 +192,7 @@ class PINN_FisherKPP:
 
 if __name__ == "__main__":
 	hidden_layers = [20, 20, 20, 20, 20, 20, 20, 20]
-	data = data.generate_data()
+	data = data.generate_data(data.u_0, data.u_b)
 	my_PINN = PINN_FisherKPP(data, hidden_layers)
 	my_PINN.train_and_show_results()
 

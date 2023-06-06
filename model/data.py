@@ -29,11 +29,11 @@ def u_b(t, x):
 def get_bounds(t_min = T_MIN, t_max = T_MAX, x_min = X_MIN, x_max = X_MAX):
 	return t_min, t_max, x_min, x_max
 
-def generate_data(num_0: int = N_INITIAL, num_b: int = N_BOUNDARY, num_r: int = N_RESIDUAL, bounds = get_bounds()):
+def generate_data(u_0, u_b, num_0: int = N_INITIAL, num_b: int = N_BOUNDARY, num_r: int = N_RESIDUAL, bounds = get_bounds()):
 	t_min, t_max, x_min, x_max = bounds
 
 	# sampling initial boundary points
-	t_0 = np.ones((num_0, 1)) * t_min
+	t_0 = np.ones(num_0) * t_min
 	x_0 = np.random.uniform(x_min, x_max, num_0)
 	u_0 = u_0(x_0)
 
