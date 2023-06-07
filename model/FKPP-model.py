@@ -24,7 +24,7 @@ class ScaleLayer(tf.keras.layers.Layer):
 
 
 class PINN_FisherKPP:
-    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, activation = 'relu', num_epochs = 200, adaptive = False):
+    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, num_epochs = 200, adaptive = False, scale_initial_by = 100):
         t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r, bounds = my_data
         self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
@@ -40,7 +40,6 @@ class PINN_FisherKPP:
 
         
         self.hidden_layers = hidden_layers
-        self.activation = activation
         self.lr_decay = lr_decay
         self.learning_rate = learning_rate
         self.num_epochs = num_epochs
@@ -70,7 +69,7 @@ class PINN_FisherKPP:
                 kernel_initializer = 'glorot_normal'))
 
         # output layer with sigmoid activation
-        model.add(tf.keras.layers.Dense(1, activation = self.activation))
+        model.add(tf.keras.layers.Dense(1, activation = 'sigmoid'))
 
         return model
 
@@ -92,12 +91,12 @@ class PINN_FisherKPP:
         res = self.residual(t, x, u_r, u_t, u_x, u_xx)
         return res
 
-    def compute_loss(self, model, scale_initial_loss = None):
+    def compute_loss(self, model):
         loss = 0
         
         u_0_pred = model(tf.stack([self.t_0, self.x_0], axis = 1))
-        scale_initial_by = 1 if scale_initial_loss is None else scale_initial_loss
-        loss += scale_initial_by * tf.reduce_mean(tf.square(self.u_0 - u_0_pred))
+        scale_initial = 1 if self.scale_initial_by is None else self.scale_initial_by
+        loss += scale_initial * tf.reduce_mean(tf.square(self.u_0 - u_0_pred))
 
         u_b_pred = model(tf.stack([self.t_b, self.x_b], axis = 1))
         loss += tf.reduce_mean(tf.square(self.u_b - u_b_pred))
@@ -123,10 +122,7 @@ class PINN_FisherKPP:
         learning_rate_fn = self.learning_rate
 
         if self.lr_decay == 'piecewise':
-            learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-                [num_epochs//3, 2*num_epochs//3], 
-                [self.learning_rate, self.learning_rate / 10.0, self.learning_rate / 20.0])
-
+            learning_rate_fn = tf.keras.optimizers.schedules.PiecewiseConstantDecay([1000,3000],[1e-2,1e-3,5e-4])
         if self.lr_decay == 'exponential':
             learning_rate_fn = tf.keras.optimizers.schedules.ExponentialDecay(
                 learning_rate, decay_steps = 100000, decay_rate = 0.96, staircase = True)
@@ -144,8 +140,6 @@ class PINN_FisherKPP:
                 print("Epoch {}: loss = {}, time elapsed {}".format(
                     epoch, loss.numpy(), time.time() - start_time))
                 if self.adaptive:
-                    #self.x_r = self.x_r[:-20]
-                    #self.t_r = self.t_r[:-20]
                     test_t, test_x = data.sample_collocation(100, self.bounds)
                     test_t = tf.convert_to_tensor(test_t, dtype = tf.float32)
                     test_x = tf.convert_to_tensor(test_x, dtype = tf.float32)
@@ -155,7 +149,6 @@ class PINN_FisherKPP:
                     new_x = tf.gather(test_x, idx)
                     self.t_r = tf.concat([self.t_r, new_t], 0)
                     self.x_r = tf.concat([self.x_r, new_x], 0)
-
 
 
         return model, losses
@@ -198,48 +191,96 @@ class PINN_FisherKPP:
         ax.set_title('Solution of FKPP equation');
         plt.savefig(subfolder + 'FKPP_Solution.pdf', bbox_inches='tight', dpi=300)
 
-        # exact solution
-        u_true = self.u_exact(t_grid, x_grid)
-        l2_error = np.linspace.norm(u_true - u_predict)
-        print("L2 error with exact solution: {}".format(l2_error))
+        
 
 
 
-    def train_and_show_results(self, subfolder):
+    def train_and_show_results(self, subfolder, case = 1):
         model, losses = self.train(self.num_epochs)
         self.plot_loss(losses, subfolder)
         self.plot_prediction(model, subfolder)
+
+        # compare errors
+        u_approx, u_predict, u_true = self.numerical_approx(model, data.u_0_case1, data.u_b_case1, case = case)
+        if case == 1:
+            print("L2 error (prediction vs. exact)): {}".format(np.linalg.norm(u_true.reshape(u_predict.shape) - u_predict)))
+            print("L2 error (numerical approx vs. exact)): {}".format(np.linalg.norm(u_true - u_approx)))
+        
+        print("L2 error (numerical approx vs. prediction)): {}".format(np.linalg.norm(u_predict - u_approx.reshape(u_predict.shape))))
+
         return model, losses
 
 
 
-    def test_accuracy(self, model, case):
+    def numerical_approx(self, model, func_u_0, func_u_b, case):
         N = 10
         M = 100
-        tspace = np.linspace(lb[0], ub[0], M + 1)
-        xspace = np.linspace(lb[1], ub[1], N + 1)
+        tspace = np.linspace(self.t_min, self.t_max, M + 1)
+        xspace = np.linspace(self.x_min, self.x_max, N + 1)
 
-        u_pred = model(tspace, xspace)
+        #choose such N,M for stability purposes
 
+
+        dx=(self.x_max - self.x_min)/N  #dx should be 0.1
+        dt=(self.t_max - self.t_min)/M #dt should be 0.001
+
+        r=dt/(dx)**2
+
+        U=np.zeros((N+1,M+1))
+        #boundary condition at x=0
+        U[0,:]=func_u_b(tspace, np.zeros(tspace.shape))
+        #boundary condition at x=1
+        U[N,:]=func_u_b(tspace, np.ones(tspace.shape))
+        #initial condition
+        U[:,0]=func_u_0(xspace)
+
+        #initialize Q,A,V
+        Q=np.zeros((N+1,M+1))
+        Q[:,0]=1-2*r+6*dt-6*dt*U[:,0]
+        A=np.zeros((N-1,N-1))
+        #tridagonal matrix 
+        test_data = [r*np.ones(N-1),np.zeros(N-1),r*np.ones(N-1)] 
+        # list of all the data
+        diags = [-1,0,1] 
+        A= scipy.sparse.spdiags(test_data,diags,N-1,N-1,format='csc')
+        A=A.todense()
+        np.fill_diagonal(A , Q[:,0])
+        V=U[1:N,0]
+        n=0
+        #making sure solution stays between 0 and 1 at all times 
+        while all(k >=0 and k<1 for k in U[:,n]) and n<M:
+            U[1:N,n+1]=np.dot(A,V)
+            U[1,n+1]=r*U[0,n]+Q[1,n]*U[1,n]+r*U[2,n]
+            U[N-1,n+1]=r*U[N-2,n]+Q[N-1,n]*U[N-1,n]+r*U[N,n]
+            Q[:,n+1]=1-2*r+6*dt-6*dt*U[:,n+1]
+            np.fill_diagonal(A , Q[:,n+1])
+            V=U[1:N,n+1]
+            n+=1
+
+        t_grid, x_grid = np.meshgrid(tspace, xspace)
+        input_tensor = tf.cast(np.vstack([t_grid.flatten(), x_grid.flatten()]).T, tf.float32)
+
+        u_pred = model(input_tensor)
+        u_true = None
         if case == 1:
-            u_true = u_exact(tspace, xspace)
-            return np.linspace.norm(u_pred - u_true)
-        else:
-            return None
+        	u_true = self.u_exact(t_grid.flatten(), x_grid.flatten())
 
+        return (U.flatten(), u_pred, u_true)
+
+  
 
 
 if __name__ == "__main__":
     my_path = os.path.dirname(__file__)
     hidden_layers = [20 for i in range(10)]
-    num_epochs = 2000
+    num_epochs = 5000
 
-
+    # Case 1 adaptive, no scaling
     my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
-    my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, num_epochs = num_epochs, adaptive = True)
-    case1_path = os.path.join(my_path, 'case1/')
+    my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = 100)
+    case1_path = os.path.join(my_path, 'case1-adaptive/')
     os.makedirs(case1_path)
-    my_PINN_case1.train_and_show_results(case1_path)
+    my_PINN_case1.train_and_show_results(case1_path, case = 1)
     #print("L2 error: ")
     #print(my_PINN_case1.test_accuracy(model_case1, case = 1))
 
