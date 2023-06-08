@@ -22,9 +22,21 @@ X_MAX = 1.
 def u_0_case1(x):
     return 1 / (1 + np.exp(x)) ** 2
 
+def u_0_case2(x, l = .5):
+	return l
+
+def u_0_case3(x):
+    return np.exp(-x)
+
 # boundary conditions
 def u_b_case1(t, x):
     return 1 / (1 + np.exp(x - 5 * t)) ** 2
+
+def u_b_case2(t, x, l = .5):
+    return l * np.exp(t) / (1 - l + l * np.exp(t))
+
+def u_b_case3(t, x):
+    return 1 if x==0 else 0
 
 
 def get_bounds(t_min = T_MIN, t_max = T_MAX, x_min = X_MIN, x_max = X_MAX):

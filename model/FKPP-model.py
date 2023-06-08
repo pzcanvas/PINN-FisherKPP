@@ -24,7 +24,7 @@ class ScaleLayer(tf.keras.layers.Layer):
 
 
 class PINN_FisherKPP:
-    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, num_epochs = 200, adaptive = False, scale_initial_by = 100):
+    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, num_epochs = 200, adaptive = False, scale_initial_by = 100, add_gelu = False):
         t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r, bounds = my_data
         self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
@@ -44,12 +44,19 @@ class PINN_FisherKPP:
         self.learning_rate = learning_rate
         self.num_epochs = num_epochs
         self.adaptive = adaptive
+        self.scale_initial_by = scale_initial_by
+        self.add_gelu = add_gelu
 
-    def residual(self, t, x, u, u_t, u_x, u_xx):
-        return u_t - u_xx - 6 * u * (1 - u)
+    def residual(self, t, x, u, u_t, u_x, u_xx, case):
+    	if case == 1:
+    		return u_t - u_xx - 6 * u * (1 - u)
+    	if case == 2 or case == 3:
+    		return u_t - u_xx - u * (1 - u)
 
-    def u_exact(self, t, x):
+    def u_exact_case1(self, t, x):
         return 1 / ((1 + np.exp(x - 5 * t)) ** 2)
+    def u_exact_case2(self, t, x, l = .5):
+        return l * np.exp(t) / (1 - l + l * np.exp(t))
 
     def build_model(self):
 
@@ -61,10 +68,18 @@ class PINN_FisherKPP:
         model.add(ScaleLayer(scale_function = scale_function))
 
         # hidden layers
-        for layer in self.hidden_layers:
+        for i in range(len(self.hidden_layers) - 1):
             # activation function - tanh
             # Xavier normal initializer
-            model.add(tf.keras.layers.Dense(layer, 
+            model.add(tf.keras.layers.Dense(self.hidden_layers[i], 
+                activation = 'tanh', 
+                kernel_initializer = 'glorot_normal'))
+        if self.add_gelu:
+        	model.add(tf.keras.layers.Dense(self.hidden_layers[-1], 
+                activation = 'gelu', 
+                kernel_initializer = 'glorot_normal'))
+        else:
+        	model.add(tf.keras.layers.Dense(self.hidden_layers[i], 
                 activation = 'tanh', 
                 kernel_initializer = 'glorot_normal'))
 
@@ -73,7 +88,7 @@ class PINN_FisherKPP:
 
         return model
 
-    def evaluate_residual(self, model, t, x):
+    def evaluate_residual(self, model, t, x, case = 1):
 
         with tf.GradientTape(persistent = True) as tape:
             #t = self.t_r
@@ -88,10 +103,10 @@ class PINN_FisherKPP:
         u_xx = tape.gradient(u_x, x)
 
         del tape
-        res = self.residual(t, x, u_r, u_t, u_x, u_xx)
+        res = self.residual(t, x, u_r, u_t, u_x, u_xx, case)
         return res
 
-    def compute_loss(self, model):
+    def compute_loss(self, model, case = 1):
         loss = 0
         
         u_0_pred = model(tf.stack([self.t_0, self.x_0], axis = 1))
@@ -101,22 +116,22 @@ class PINN_FisherKPP:
         u_b_pred = model(tf.stack([self.t_b, self.x_b], axis = 1))
         loss += tf.reduce_mean(tf.square(self.u_b - u_b_pred))
 
-        res = self.evaluate_residual(model, self.t_r, self.x_r)
+        res = self.evaluate_residual(model, self.t_r, self.x_r, case)
         loss += tf.reduce_mean(tf.square(res))
 
         return loss
     #@tf.function
-    def compute_grad(self, model):
+    def compute_grad(self, model, case = 1):
         with tf.GradientTape(persistent = True) as tape:
             tape.watch(model.trainable_variables)
-            loss = self.compute_loss(model)
+            loss = self.compute_loss(model, case)
         grad = tape.gradient(loss, model.trainable_variables)
         del tape
         return loss, grad
 
 
 
-    def train(self, num_epochs):
+    def train(self, num_epochs, case = 1):
         model = self.build_model()
 
         learning_rate_fn = self.learning_rate
@@ -133,7 +148,7 @@ class PINN_FisherKPP:
         start_time = time.time()
 
         for epoch in range(1, num_epochs + 1):
-            loss, grad = self.compute_grad(model)
+            loss, grad = self.compute_grad(model, case)
             optimizer.apply_gradients(zip(grad, model.trainable_variables))
             losses.append(loss.numpy())
             if epoch % 50 == 0:
@@ -143,7 +158,7 @@ class PINN_FisherKPP:
                     test_t, test_x = data.sample_collocation(100, self.bounds)
                     test_t = tf.convert_to_tensor(test_t, dtype = tf.float32)
                     test_x = tf.convert_to_tensor(test_x, dtype = tf.float32)
-                    res = self.evaluate_residual(model, test_t, test_x)
+                    res = self.evaluate_residual(model, test_t, test_x, case)
                     idx = tf.math.top_k(tf.reshape(res,[-1]), k = 20).indices
                     new_t = tf.gather(test_t, idx)
                     new_x = tf.gather(test_x, idx)
@@ -196,17 +211,31 @@ class PINN_FisherKPP:
 
 
     def train_and_show_results(self, subfolder, case = 1):
-        model, losses = self.train(self.num_epochs)
+        model, losses = self.train(self.num_epochs, case)
         self.plot_loss(losses, subfolder)
         self.plot_prediction(model, subfolder)
 
         # compare errors
-        u_approx, u_predict, u_true = self.numerical_approx(model, data.u_0_case1, data.u_b_case1, case = case)
         if case == 1:
+        	func_u_0 = data.u_0_case1
+        	func_u_b = data.u_b_case1
+        if case == 2:
+        	func_u_0 = data.u_0_case2
+        	func_u_b = data.u_b_case2
+        if case == 3:
+        	func_u_0 = data.u_0_case3
+        	func_u_b = data.u_b_case3
+
+        u_approx, u_predict, u_true = self.numerical_approx(model, func_u_0, func_u_b, case = case)
+        if case == 1 or case == 2:
             print("L2 error (prediction vs. exact)): {}".format(np.linalg.norm(u_true.reshape(u_predict.shape) - u_predict)))
             print("L2 error (numerical approx vs. exact)): {}".format(np.linalg.norm(u_true - u_approx)))
+            print("L-infinity error (prediction vs. exact)): {}".format(np.linalg.norm(u_true.reshape(u_predict.shape) - u_predict, np.inf)))
+            print("L-infinity error (numerical approx vs. exact)): {}".format(np.linalg.norm(u_true - u_approx, np.inf)))
+            
         
         print("L2 error (numerical approx vs. prediction)): {}".format(np.linalg.norm(u_predict - u_approx.reshape(u_predict.shape))))
+        print("L-infinity error (numerical approx vs. prediction)): {}".format(np.linalg.norm(u_predict - u_approx.reshape(u_predict.shape), np.inf)))
 
         return model, losses
 
@@ -263,7 +292,21 @@ class PINN_FisherKPP:
         u_pred = model(input_tensor)
         u_true = None
         if case == 1:
-        	u_true = self.u_exact(t_grid.flatten(), x_grid.flatten())
+        	u_true = self.u_exact_case1(t_grid.flatten(), x_grid.flatten())
+
+        	# compare results at the final time
+        	for i in range(len(xspace)):
+        		x = xspace[i]
+        		soln_exact = self.u_exact_case1(self.t_max, x)
+        		pinn_input = tf.cast(np.vstack([self.t_max, x]).T, tf.float32)
+        		soln_pinn = model(pinn_input)
+        		soln_numerical = U[-1, i]
+        		print("x value: {},    exact solution: {},    PINN: {},    numerical: {}".format(x, soln_exact, soln_pinn, soln_numerical))
+        		print("PINN-abs:  {}, numerical-abs: {}".format(np.abs(soln_exact - soln_pinn), np.abs(soln_exact - soln_numerical)))
+        if case == 2:
+        	u_true = self.u_exact_case2(t_grid.flatten(), x_grid.flatten())
+
+        
 
         return (U.flatten(), u_pred, u_true)
 
@@ -274,15 +317,21 @@ if __name__ == "__main__":
     my_path = os.path.dirname(__file__)
     hidden_layers = [20 for i in range(10)]
     num_epochs = 5000
+    tf.random.set_seed(0)
 
     # Case 1 adaptive, no scaling
+    # my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
+    # my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = None)
+    # case1_path = os.path.join(my_path, 'case1-adaptive/')
+    # os.makedirs(case1_path)
+    # my_PINN_case1.train_and_show_results(case1_path, case = 1)
+    
+    # Case 1 adaptive, with scaling
     my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
-    my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = 100)
-    case1_path = os.path.join(my_path, 'case1-adaptive/')
+    my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = 100, add_gelu = False)
+    case1_path = os.path.join(my_path, 'case1-as/')
     os.makedirs(case1_path)
     my_PINN_case1.train_and_show_results(case1_path, case = 1)
-    #print("L2 error: ")
-    #print(my_PINN_case1.test_accuracy(model_case1, case = 1))
 
 
 
