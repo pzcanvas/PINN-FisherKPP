@@ -1,4 +1,4 @@
-# PINN-FisherKPP
+# Solving Fisher-KPP equation using neural networks
  
 In the past few years, there has been great interest on adopting deep neural network approaches to solve partial differential equations (PDEs). In this project we work on solving the the Fisher-KPP equation(or Fisher's equation,  Kolmogorov–Petrovsky–Piskunov equation). by data-driven deep learning methods adapted and improved from the original PINN (Physics Informed Neural Networks) method (Raissi et al, 2017), leveraging our knowledge of the long-time behavior of the solution. We also compare to other existing numerical approximation methods and assess the accuracy of our method by comparing with the exact solution, for initial and boundary conditions for which an analytic solution to Fisher-KPP exists. To the best of our knowledge this has not been attempted before for this equation.
 
