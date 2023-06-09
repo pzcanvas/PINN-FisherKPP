@@ -24,7 +24,8 @@ class ScaleLayer(tf.keras.layers.Layer):
 
 
 class PINN_FisherKPP:
-    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, num_epochs = 200, adaptive = False, scale_initial_by = 100, add_gelu = False):
+    def __init__(self, my_data, hidden_layers, learning_rate = 0.01, lr_decay = None, 
+    	num_epochs = 200, adaptive = False, scale_initial_by = 100, add_gelu = False):
         t_0, x_0, u_0, t_b, x_b, u_b, t_r, x_r, bounds = my_data
         self.t_min, self.t_max, self.x_min, self.x_max = bounds
 
@@ -47,12 +48,14 @@ class PINN_FisherKPP:
         self.scale_initial_by = scale_initial_by
         self.add_gelu = add_gelu
 
+    # compute the strong residual 
     def residual(self, t, x, u, u_t, u_x, u_xx, case):
     	if case == 1:
     		return u_t - u_xx - 6 * u * (1 - u)
     	if case == 2 or case == 3:
     		return u_t - u_xx - u * (1 - u)
 
+    # exact solution
     def u_exact_case1(self, t, x):
         return 1 / ((1 + np.exp(x - 5 * t)) ** 2)
     def u_exact_case2(self, t, x, l = .5):
@@ -91,8 +94,6 @@ class PINN_FisherKPP:
     def evaluate_residual(self, model, t, x, case = 1):
 
         with tf.GradientTape(persistent = True) as tape:
-            #t = self.t_r
-            #x = self.x_r
             tape.watch(t)
             tape.watch(x)
 
@@ -120,7 +121,7 @@ class PINN_FisherKPP:
         loss += tf.reduce_mean(tf.square(res))
 
         return loss
-    #@tf.function
+
     def compute_grad(self, model, case = 1):
         with tf.GradientTape(persistent = True) as tape:
             tape.watch(model.trainable_variables)
@@ -300,7 +301,7 @@ class PINN_FisherKPP:
         		soln_exact = self.u_exact_case1(self.t_max, x)
         		pinn_input = tf.cast(np.vstack([self.t_max, x]).T, tf.float32)
         		soln_pinn = model(pinn_input)
-        		soln_numerical = U[-1, i]
+        		soln_numerical = U[i, -1]
         		print("x value: {},    exact solution: {},    PINN: {},    numerical: {}".format(x, soln_exact, soln_pinn, soln_numerical))
         		print("PINN-abs:  {}, numerical-abs: {}".format(np.abs(soln_exact - soln_pinn), np.abs(soln_exact - soln_numerical)))
         if case == 2:
@@ -318,13 +319,6 @@ if __name__ == "__main__":
     hidden_layers = [20 for i in range(10)]
     num_epochs = 5000
     tf.random.set_seed(0)
-
-    # Case 1 adaptive, no scaling
-    # my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
-    # my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = None)
-    # case1_path = os.path.join(my_path, 'case1-adaptive/')
-    # os.makedirs(case1_path)
-    # my_PINN_case1.train_and_show_results(case1_path, case = 1)
     
     # Case 1 adaptive, with scaling
     my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
