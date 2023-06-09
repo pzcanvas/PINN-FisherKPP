@@ -323,7 +323,7 @@ if __name__ == "__main__":
     # Case 1 adaptive, with scaling
     my_data_case1 = data.generate_data(data.u_0_case1, data.u_b_case1)
     my_PINN_case1 = PINN_FisherKPP(my_data_case1, hidden_layers, learning_rate = 0.01, lr_decay = 'piecewise', num_epochs = num_epochs, adaptive = True, scale_initial_by = 100, add_gelu = False)
-    case1_path = os.path.join(my_path, 'case1-as/')
+    case1_path = os.path.join(my_path, 'experiments/case1-as/')
     os.makedirs(case1_path)
     my_PINN_case1.train_and_show_results(case1_path, case = 1)
 
