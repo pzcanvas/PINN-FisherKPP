@@ -5,12 +5,10 @@ import matplotlib.pyplot as plt
 from matplotlib.pyplot import imread
 from mpl_toolkits.mplot3d import Axes3D
 import scipy
-#import pandas as pd
 import time
 import data
 import os
 
-#tf.keras.backend.set_floatx('float32')
 
 # define a new tf.keras.layers.Layer per recommendation of 
 # TensorFlow workflow (instead of using tf.keras.layers.Lambda)
